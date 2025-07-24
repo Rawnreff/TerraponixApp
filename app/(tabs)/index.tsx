@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import SensorCard from '../../components/SensorCard';
+import SensorDashboard from '../../components/SensorDashboard';
 import { apiService, SensorData, DeviceStatus } from '../../services/apiService';
 
 export default function DashboardScreen() {
@@ -155,91 +156,8 @@ export default function DashboardScreen() {
       {/* Sensor Data */}
       {sensorData ? (
         <>
-          <Text style={styles.sectionTitle}>Sensor Readings</Text>
-          <View style={styles.sensorsGrid}>
-            <SensorCard
-              title="Temperature"
-              value={sensorData.temperature}
-              unit="°C"
-              icon="thermometer"
-              status={getSensorStatus(sensorData.temperature, 20, 30)}
-              min={20}
-              max={30}
-            />
-            <SensorCard
-              title="Humidity"
-              value={sensorData.humidity}
-              unit="%"
-              icon="water"
-              status={getSensorStatus(sensorData.humidity, 60, 80)}
-              min={60}
-              max={80}
-            />
-            <SensorCard
-              title="pH Level"
-              value={sensorData.ph}
-              unit=""
-              icon="flask"
-              status={getSensorStatus(sensorData.ph, 5.5, 6.5)}
-              min={5.5}
-              max={6.5}
-            />
-            <SensorCard
-              title="TDS"
-              value={sensorData.tds}
-              unit="ppm"
-              icon="analytics"
-              status={getSensorStatus(sensorData.tds, 800, 1200)}
-              min={800}
-              max={1200}
-            />
-            <SensorCard
-              title="Light"
-              value={sensorData.light_intensity}
-              unit="%"
-              icon="sunny"
-              status={getSensorStatus(sensorData.light_intensity, 40, 80)}
-              min={40}
-              max={80}
-            />
-            <SensorCard
-              title="CO₂"
-              value={sensorData.co2}
-              unit="ppm"
-              icon="cloud"
-              status={getSensorStatus(sensorData.co2, 300, 600)}
-              min={300}
-              max={600}
-            />
-          </View>
-
-          {/* Additional Sensors */}
-          {(sensorData.soil_moisture !== undefined || sensorData.water_level !== undefined) && (
-            <View style={styles.sensorsGrid}>
-              {sensorData.soil_moisture !== undefined && (
-                <SensorCard
-                  title="Soil Moisture"
-                  value={sensorData.soil_moisture}
-                  unit="%"
-                  icon="leaf"
-                  status={getSensorStatus(sensorData.soil_moisture, 70, 90)}
-                  min={70}
-                  max={90}
-                />
-              )}
-              {sensorData.water_level !== undefined && (
-                <SensorCard
-                  title="Water Level"
-                  value={sensorData.water_level}
-                  unit="%"
-                  icon="water-outline"
-                  status={getSensorStatus(sensorData.water_level, 50, 90)}
-                  min={50}
-                  max={90}
-                />
-              )}
-            </View>
-          )}
+          <Text style={styles.sectionTitle}>Sensor Monitoring</Text>
+          <SensorDashboard sensorData={sensorData} />
         </>
       ) : (
         <View style={styles.noDataContainer}>
