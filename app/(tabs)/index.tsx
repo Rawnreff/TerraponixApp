@@ -1,75 +1,140 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+const API_BASE_URL = 'http://YOUR_FLASK_SERVER_IP:5000/api/mobile'; // sesuaikan dengan ip flask yang baru
 
-export default function HomeScreen() {
+interface SensorData {
+  temperature: number;
+  humidity: number;
+  ph: number;
+  tds: number;
+  ldr: number;
+  co2: number;
+  timestamp: string;
+}
+
+export default function DashboardScreen() { // Pastikan export default function di sini
+  const [sensorData, setSensorData] = useState<SensorData | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/sensor_data`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error("No sensor data available yet.");
+        }
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      const data: SensorData = await response.json();
+      setSensorData(data);
+    } catch (err: any) {
+      console.error('Error fetching sensor data:', err);
+      setError(`Failed to fetch sensor data: ${err.message}`);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 10000); // Refresh data setiap 10 detik
+    return () => clearInterval(interval); // Cleanup on unmount
+  }, []);
+
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#0000ff" />
+        <Text>Loading sensor data...</Text>
+      </View>
+    );
+  }
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <ScrollView
+      contentContainerStyle={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
+      <Text style={styles.header}>Terraponix Dashboard</Text>
+      {error && <Text style={styles.errorText}>{error}</Text>}
+      {sensorData ? (
+        <View style={styles.dataContainer}>
+          <Text style={styles.dataText}>Temperature: {sensorData.temperature}°C</Text>
+          <Text style={styles.dataText}>Humidity: {sensorData.humidity}%</Text>
+          <Text style={styles.dataText}>pH: {sensorData.ph}</Text>
+          <Text style={styles.dataText}>TDS: {sensorData.tds} ppm</Text>
+          <Text style={styles.dataText}>LDR: {sensorData.ldr}</Text>
+          <Text style={styles.dataText}>CO₂: {sensorData.co2} ppm</Text>
+          <Text style={styles.timestampText}>Last updated: {new Date(sensorData.timestamp).toLocaleString()}</Text>
+        </View>
+      ) : (
+        <Text style={styles.noDataText}>No sensor data available. Pull down to refresh.</Text>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  container: {
+    flexGrow: 1,
+    padding: 20,
+    backgroundColor: '#f5f5f5',
     alignItems: 'center',
-    gap: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  header: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 30,
+    color: '#333',
   },
+  dataContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 20,
+    width: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  dataText: {
+    fontSize: 20,
+    marginBottom: 10,
+    color: '#555',
+  },
+  timestampText: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 15,
+    textAlign: 'right',
+  },
+  noDataText: {
+    fontSize: 18,
+    color: '#888',
+    marginTop: 50,
+  },
+  errorText: {
+    color: 'red',
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+  }
 });
