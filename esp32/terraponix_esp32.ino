@@ -2,54 +2,51 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
+#include <ESP32Servo.h>
 
 // WiFi credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "Xiaomi 14T Pro";
+const char* password = "jougen92";
 
-// Server configuration
-const char* serverURL = "http://192.168.1.100:5000/api/sensor-data"; // Change to your laptop's IP
+// Server configuration - GANTI DENGAN IP SERVER ANDA
+const char* serverURL = "http://192.168.106.38:5000/api/sensor-data";
 
-// Sensor pins
-#define DHT_PIN 4
-#define DHT_TYPE DHT22
-#define PH_PIN A0
-#define TDS_PIN A1
-#define LDR_PIN A2
-#define CO2_PIN A3
-#define SOIL_MOISTURE_PIN A4
-#define WATER_LEVEL_PIN A5
-#define BATTERY_PIN A6
+// Pin Definitions
+#define DHTPIN 25         // Pin DHT11
+#define DHTTYPE DHT11
+#define PH_PIN 34         // Pin pH sensor (Analog)
+#define LDR_PIN 35        // Pin LDR (Analog)
+#define SERVO_PIN 13      // Pin Servo (Tirai)
+#define WATER_LEVEL_PIN 32 // Pin Water Level Sensor (Analog)
+#define PUMP_PIN 14       // Pin Pompa Air
+#define FAN_PIN 12        // Pin Kipas
 
-// Control pins
-#define PUMP_PIN 2
-#define FAN_PIN 3
-#define CURTAIN_PIN 5
+// Kalibrasi
+float pH_offset = 0.0;
+const float TEMP_THRESHOLD = 29.0;  // Suhu panas (°C)
+const int LDR_THRESHOLD = 2200;     // Cahaya terang (LDR ≥2200)
+const int WATER_LEVEL_THRESHOLD = 1500; // Threshold level air
+const int SOIL_MOISTURE_THRESHOLD = 30; // Kelembaban tanah minimal
 
-// Solar monitoring pins
-#define SOLAR_VOLTAGE_PIN A7
-#define SOLAR_CURRENT_PIN A8
-
-// Initialize DHT sensor
-DHT dht(DHT_PIN, DHT_TYPE);
+DHT dht(DHTPIN, DHTTYPE);
+Servo servo;
 
 // Variables
 unsigned long lastSensorRead = 0;
 unsigned long lastDataSend = 0;
-const unsigned long SENSOR_INTERVAL = 5000;  // Read sensors every 5 seconds
-const unsigned long SEND_INTERVAL = 30000;   // Send data every 30 seconds
+const unsigned long SENSOR_INTERVAL = 5000;  // Baca sensor setiap 5 detik
+const unsigned long SEND_INTERVAL = 30000;   // Kirim data setiap 30 detik
 
 struct SensorData {
   float temperature;
   float humidity;
   float ph;
-  float tds;
-  float light_intensity;
-  float co2;
-  float soil_moisture;
-  float water_level;
-  float battery_level;
-  float solar_power;
+  int light_intensity;
+  int water_level;
+  String water_status;
+  String curtain_status;
+  String wifi_status;
+  String ip_address;
 };
 
 SensorData currentData;
@@ -57,161 +54,146 @@ SensorData currentData;
 void setup() {
   Serial.begin(115200);
   
-  // Initialize sensors
+  // Inisialisasi sensor dan aktuator
   dht.begin();
-  
-  // Initialize control pins
+  servo.attach(SERVO_PIN);
+  servo.write(90);  // Posisi awal servo (terbuka)
   pinMode(PUMP_PIN, OUTPUT);
   pinMode(FAN_PIN, OUTPUT);
-  pinMode(CURTAIN_PIN, OUTPUT);
-  
-  // Set initial states
   digitalWrite(PUMP_PIN, LOW);
   digitalWrite(FAN_PIN, LOW);
-  digitalWrite(CURTAIN_PIN, LOW);
   
-  // Connect to WiFi
+  // Mulai koneksi WiFi
   connectToWiFi();
   
-  Serial.println("🌱 Terraponix ESP32 System Initialized");
-  Serial.println("📡 Starting sensor monitoring...");
+  Serial.println("\nSistem TERRAPONIX Started!");
+  Serial.println("==========================");
 }
 
 void loop() {
-  // Check WiFi connection
+  // Periksa status WiFi
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected. Reconnecting...");
+    Serial.println("Koneksi WiFi terputus! Mencoba menghubungkan kembali...");
     connectToWiFi();
+    delay(5000);
+    return;
   }
-  
-  // Read sensors at specified interval
+
+  // Baca sensor pada interval yang ditentukan
   if (millis() - lastSensorRead >= SENSOR_INTERVAL) {
     readSensors();
     lastSensorRead = millis();
   }
   
-  // Send data at specified interval
-  if (millis() - lastDataSend >= SEND_INTERVAL) {
+  // Kirim data ke server pada interval yang ditentukan
+  if (millis() - lastDataSend >= SEND_INTERVAL && WiFi.status() == WL_CONNECTED) {
     sendSensorData();
     lastDataSend = millis();
   }
   
-  // Check for incoming commands
-  checkForCommands();
+  // Kontrol otomatis sistem
+  automaticControl();
   
   delay(100);
 }
 
 void connectToWiFi() {
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
+  Serial.print("Menghubungkan ke WiFi");
   
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(1000);
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
     Serial.print(".");
     attempts++;
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println();
-    Serial.print("✅ WiFi Connected! IP address: ");
+    Serial.println("\nWiFi Terhubung!");
+    Serial.print("Alamat IP: ");
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println();
-    Serial.println("❌ WiFi connection failed!");
+    Serial.println("\nGagal terhubung ke WiFi!");
   }
 }
 
 void readSensors() {
-  // Read DHT22 (Temperature & Humidity)
+  // Baca DHT (Suhu & Kelembapan)
   currentData.temperature = dht.readTemperature();
   currentData.humidity = dht.readHumidity();
   
-  // Check if DHT readings are valid
+  // Validasi pembacaan DHT
   if (isnan(currentData.temperature) || isnan(currentData.humidity)) {
-    Serial.println("⚠️ Failed to read from DHT sensor!");
-    currentData.temperature = 25.0; // Default value
-    currentData.humidity = 60.0;    // Default value
+    Serial.println("⚠️ Gagal membaca DHT sensor!");
+    currentData.temperature = 25.0;
+    currentData.humidity = 60.0;
   }
   
-  // Read pH sensor (analog)
-  int phRaw = analogRead(PH_PIN);
-  currentData.ph = map(phRaw, 0, 4095, 0, 14) / 10.0; // Convert to pH scale
+  // Baca sensor pH
+  currentData.ph = read_pH();
   
-  // Read TDS sensor (analog)
-  int tdsRaw = analogRead(TDS_PIN);
-  currentData.tds = map(tdsRaw, 0, 4095, 0, 2000); // Convert to ppm
+  // Baca intensitas cahaya
+  currentData.light_intensity = analogRead(LDR_PIN);
   
-  // Read LDR (Light sensor)
-  int ldrRaw = analogRead(LDR_PIN);
-  currentData.light_intensity = map(ldrRaw, 0, 4095, 0, 100); // Convert to percentage
-  
-  // Read CO2 sensor (analog)
-  int co2Raw = analogRead(CO2_PIN);
-  currentData.co2 = map(co2Raw, 0, 4095, 300, 2000); // Convert to ppm
-  
-  // Read soil moisture sensor
-  int soilRaw = analogRead(SOIL_MOISTURE_PIN);
-  currentData.soil_moisture = map(soilRaw, 0, 4095, 100, 0); // Inverted: wet = high value
-  
-  // Read water level sensor
+  // Baca level air
   int waterRaw = analogRead(WATER_LEVEL_PIN);
-  currentData.water_level = map(waterRaw, 0, 4095, 0, 100); // Convert to percentage
+  currentData.water_level = waterRaw;
+  currentData.water_status = (waterRaw < WATER_LEVEL_THRESHOLD) ? "RENDAH" : "CUKUP";
   
-  // Read battery level
-  int batteryRaw = analogRead(BATTERY_PIN);
-  currentData.battery_level = map(batteryRaw, 0, 4095, 0, 100); // Convert to percentage
+  // Status tirai
+  currentData.curtain_status = (servo.read() == 0) ? "Tertutup" : "Terbuka";
   
-  // Calculate solar power
-  int solarVoltageRaw = analogRead(SOLAR_VOLTAGE_PIN);
-  int solarCurrentRaw = analogRead(SOLAR_CURRENT_PIN);
-  float voltage = (solarVoltageRaw / 4095.0) * 3.3 * 4; // Assuming voltage divider
-  float current = (solarCurrentRaw / 4095.0) * 3.3; // Assuming current sensor
-  currentData.solar_power = voltage * current; // Power = V * I
+  // Status WiFi
+  currentData.wifi_status = (WiFi.status() == WL_CONNECTED) ? "Terhubung" : "Terputus";
+  currentData.ip_address = WiFi.localIP().toString();
   
-  // Print sensor readings to Serial Monitor
-  Serial.println("📊 Sensor Readings:");
-  Serial.printf("   🌡️  Temperature: %.1f°C\n", currentData.temperature);
-  Serial.printf("   💧  Humidity: %.1f%%\n", currentData.humidity);
-  Serial.printf("   🧪  pH: %.1f\n", currentData.ph);
-  Serial.printf("   📈  TDS: %.0f ppm\n", currentData.tds);
-  Serial.printf("   ☀️  Light: %.0f%%\n", currentData.light_intensity);
-  Serial.printf("   💨  CO2: %.0f ppm\n", currentData.co2);
-  Serial.printf("   🌱  Soil Moisture: %.0f%%\n", currentData.soil_moisture);
-  Serial.printf("   🚰  Water Level: %.0f%%\n", currentData.water_level);
-  Serial.printf("   🔋  Battery: %.0f%%\n", currentData.battery_level);
-  Serial.printf("   ⚡  Solar Power: %.1fW\n", currentData.solar_power);
-  Serial.println();
+  // Tampilkan data di Serial Monitor
+  printSensorData();
+}
+
+float read_pH() {
+  int pH_raw = analogRead(PH_PIN);
+  float voltage = pH_raw * (3.3 / 4095.0);
+  return 7.0 - ((voltage - pH_offset) / 0.18);  // Rumus kalibrasi pH
+}
+
+void printSensorData() {
+  Serial.println("=== DATA SENSOR ===");
+  Serial.printf("Suhu: %.1f °C\n", currentData.temperature);
+  Serial.printf("Kelembapan: %.1f %%\n", currentData.humidity);
+  Serial.printf("pH Air: %.2f (0-14)\n", currentData.ph);
+  Serial.printf("Cahaya (LDR): %d\n", currentData.light_intensity);
+  Serial.printf("Level Air: %s\n", currentData.water_status.c_str());
+  Serial.printf("Nilai Tinggi Air Sensor: %d\n", currentData.water_level);
+  Serial.printf("Status Tirai: %s\n", currentData.curtain_status.c_str());
+  Serial.printf("Status WiFi: %s\n", currentData.wifi_status.c_str());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("Alamat IP: %s\n", currentData.ip_address.c_str());
+  }
+  Serial.println("===================");
 }
 
 void sendSensorData() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("❌ WiFi not connected. Cannot send data.");
-    return;
-  }
-  
   HTTPClient http;
   http.begin(serverURL);
   http.addHeader("Content-Type", "application/json");
   
-  // Create JSON payload
-  DynamicJsonDocument doc(1024);
+  // Buat payload JSON
+  DynamicJsonDocument doc(512);
   doc["temperature"] = currentData.temperature;
   doc["humidity"] = currentData.humidity;
   doc["ph"] = currentData.ph;
-  doc["tds"] = currentData.tds;
   doc["light_intensity"] = currentData.light_intensity;
-  doc["co2"] = currentData.co2;
-  doc["soil_moisture"] = currentData.soil_moisture;
   doc["water_level"] = currentData.water_level;
-  doc["battery_level"] = currentData.battery_level;
-  doc["solar_power"] = currentData.solar_power;
+  doc["water_status"] = currentData.water_status;
+  doc["curtain_status"] = currentData.curtain_status;
+  doc["wifi_status"] = currentData.wifi_status;
+  doc["ip_address"] = currentData.ip_address;
   
   String jsonString;
   serializeJson(doc, jsonString);
   
-  Serial.println("📡 Sending data to server...");
+  Serial.println("📡 Mengirim data ke server...");
   Serial.println("JSON: " + jsonString);
   
   int httpResponseCode = http.POST(jsonString);
@@ -227,61 +209,30 @@ void sendSensorData() {
   http.end();
 }
 
-void checkForCommands() {
-  // This function would check for incoming commands from the server
-  // For now, we'll implement basic automatic control based on sensor readings
+void automaticControl() {
+  // Kontrol tirai otomatis
+  if (currentData.temperature >= TEMP_THRESHOLD && currentData.light_intensity >= LDR_THRESHOLD) {
+    servo.write(0);  // Tutup tirai
+    Serial.println("[Aksi] Tirai ditutup (Suhu Panas + Cahaya Terang)");
+    currentData.curtain_status = "Tertutup";
+  } else {
+    servo.write(90); // Buka tirai
+    currentData.curtain_status = "Terbuka";
+  }
   
-  // Automatic pump control based on soil moisture
-  if (currentData.soil_moisture < 30) {
+  // Kontrol pompa air otomatis
+  if (currentData.water_level < WATER_LEVEL_THRESHOLD) {
     digitalWrite(PUMP_PIN, HIGH);
-    Serial.println("💧 Auto: Pump ON - Low soil moisture");
-  } else if (currentData.soil_moisture > 80) {
+    Serial.println("[Aksi] Pompa ON - Level air rendah");
+  } else {
     digitalWrite(PUMP_PIN, LOW);
-    Serial.println("💧 Auto: Pump OFF - High soil moisture");
   }
   
-  // Automatic fan control based on temperature
-  if (currentData.temperature > 30) {
+  // Kontrol kipas otomatis
+  if (currentData.temperature > TEMP_THRESHOLD) {
     digitalWrite(FAN_PIN, HIGH);
-    Serial.println("🌀 Auto: Fan ON - High temperature");
-  } else if (currentData.temperature < 25) {
+    Serial.println("[Aksi] Kipas ON - Suhu tinggi");
+  } else {
     digitalWrite(FAN_PIN, LOW);
-    Serial.println("🌀 Auto: Fan OFF - Normal temperature");
-  }
-  
-  // Automatic curtain control based on light intensity
-  if (currentData.light_intensity > 80) {
-    digitalWrite(CURTAIN_PIN, HIGH);
-    Serial.println("🏠 Auto: Curtain CLOSED - High light intensity");
-  } else if (currentData.light_intensity < 40) {
-    digitalWrite(CURTAIN_PIN, LOW);
-    Serial.println("🏠 Auto: Curtain OPEN - Low light intensity");
-  }
-}
-
-// Helper function to map float values
-float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
-// Function to handle manual control commands (for future HTTP endpoint)
-void handleControlCommand(String command, bool value) {
-  if (command == "pump") {
-    digitalWrite(PUMP_PIN, value ? HIGH : LOW);
-    Serial.printf("🎛️ Manual: Pump %s\n", value ? "ON" : "OFF");
-  } else if (command == "fan") {
-    digitalWrite(FAN_PIN, value ? HIGH : LOW);
-    Serial.printf("🎛️ Manual: Fan %s\n", value ? "ON" : "OFF");
-  } else if (command == "curtain") {
-    digitalWrite(CURTAIN_PIN, value ? HIGH : LOW);
-    Serial.printf("🎛️ Manual: Curtain %s\n", value ? "CLOSED" : "OPEN");
-  } else if (command == "reset_system") {
-    Serial.println("🔄 System Reset Requested");
-    ESP.restart();
-  } else if (command == "emergency_stop") {
-    Serial.println("🛑 Emergency Stop Activated");
-    digitalWrite(PUMP_PIN, LOW);
-    digitalWrite(FAN_PIN, LOW);
-    digitalWrite(CURTAIN_PIN, LOW);
   }
 }

@@ -103,7 +103,7 @@ def simulate_humidity_sensor(api_url):
 if __name__ == '__main__':
     # Ganti dengan IP address perangkat yang menjalankan API
     # Contoh: "http://192.168.43.100:5000" untuk hotspot
-    API_URL = "http://localhost:5000"
+    API_URL = "http://192.168.106.38:5000"
     
     print("🔧 Contoh penggunaan Sensor Client")
     print("📱 Pastikan API server sudah berjalan")

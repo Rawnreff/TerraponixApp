@@ -20,7 +20,7 @@ class APITester:
         url = f"{self.base_url}{endpoint}"
         
         try:
-            print(f"🧪 Testing {name}...")
+            print(f"🧪 Testing {name}...")s
             print(f"   {method} {url}")
             
             if method.upper() == 'GET':
