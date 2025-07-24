@@ -94,14 +94,32 @@ class ApiService {
   }
 
   // Get historical sensor data
-  async getHistoricalData(hours: number = 24, limit: number = 100): Promise<HistoricalData[]> {
+  async getHistoricalData(hours: number = 24, limit: number = 100, sensor?: string): Promise<HistoricalData[]> {
     try {
+      const params: any = { hours, limit };
+      if (sensor) {
+        params.sensor = sensor;
+      }
+      
       const response = await api.get<HistoricalData[]>('/historical-data', {
-        params: { hours, limit }
+        params
       });
       return response.data;
     } catch (error) {
       console.error('Error getting historical data:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  // Get sensor statistics
+  async getSensorStats(hours: number = 24): Promise<any> {
+    try {
+      const response = await api.get('/sensor-stats', {
+        params: { hours }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error getting sensor stats:', error);
       throw this.handleError(error);
     }
   }

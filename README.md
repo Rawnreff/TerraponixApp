@@ -84,13 +84,39 @@ Terraponix adalah solusi inovatif untuk urban farming yang mengintegrasikan tekn
 
 ### Backend (Flask Server)
 
-1. **Install Python Dependencies**
+1. **Install MySQL Server**
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install mysql-server
+
+# MacOS
+brew install mysql
+
+# Windows: Download MySQL installer from mysql.com
+```
+
+2. **Install Python Dependencies**
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-2. **Run Flask Server**
+3. **Configure Database**
+```bash
+# Copy environment template
+cp .env.example .env
+
+# Edit .env file with your MySQL credentials
+nano .env
+```
+
+4. **Setup Database**
+```bash
+python setup_mysql.py
+```
+
+5. **Run Flask Server**
 ```bash
 python app.py
 ```
@@ -196,9 +222,13 @@ UPDATE control_settings SET
 ## 📱 Mobile App Features
 
 ### Dashboard Tab
-- **Real-time Monitoring**: Live sensor readings
-- **Device Status**: Battery, solar, connectivity
-- **Visual Indicators**: Color-coded status alerts
+- **Real-time Monitoring**: Live sensor readings dengan grafik interaktif
+- **Chart Visualization**: Area chart dan line chart untuk trend analysis
+- **Device Status**: Battery, solar, connectivity status
+- **Dual View Mode**: Switchable antara card view dan chart view
+- **Time Range Selection**: 1 jam, 6 jam, 24 jam historical data
+- **Statistics Display**: Min, max, average values untuk setiap sensor
+- **Threshold Indicators**: Visual garis batas optimal pada grafik
 - **Auto Refresh**: Data update setiap 30 detik
 
 ### Controls Tab

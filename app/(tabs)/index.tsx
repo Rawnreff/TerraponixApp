@@ -7,10 +7,12 @@ import {
   ActivityIndicator, 
   RefreshControl,
   TouchableOpacity,
-  Alert
+  Alert,
+  Switch
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import SensorCard from '../../components/SensorCard';
+import ChartCard from '../../components/ChartCard';
 import { apiService, SensorData, DeviceStatus } from '../../services/apiService';
 
 export default function DashboardScreen() {
@@ -20,14 +22,21 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'cards' | 'charts'>('charts');
+  const [sensorStats, setSensorStats] = useState<any>({});
 
   const fetchData = async () => {
     setError(null);
     try {
-      const response = await apiService.getCurrentData();
-      setSensorData(response.sensor_data);
-      setDeviceStatus(response.device_status);
-      setLastUpdate(new Date(response.timestamp).toLocaleString());
+      const [currentDataResponse, statsResponse] = await Promise.all([
+        apiService.getCurrentData(),
+        apiService.getSensorStats(24)
+      ]);
+      
+      setSensorData(currentDataResponse.sensor_data);
+      setDeviceStatus(currentDataResponse.device_status);
+      setLastUpdate(new Date(currentDataResponse.timestamp).toLocaleString());
+      setSensorStats(statsResponse);
     } catch (err: any) {
       console.error('Error fetching sensor data:', err);
       setError(err.message);
@@ -37,6 +46,14 @@ export default function DashboardScreen() {
         setSensorData(mockSensorData);
         setDeviceStatus(mockDeviceStatus);
         setLastUpdate(new Date().toLocaleString());
+        setSensorStats({
+          temperature: { avg: 25.5, min: 20.2, max: 28.9 },
+          humidity: { avg: 68.2, min: 55.1, max: 82.3 },
+          ph: { avg: 6.1, min: 5.8, max: 6.4 },
+          tds: { avg: 850, min: 750, max: 950 },
+          light_intensity: { avg: 75, min: 45, max: 95 },
+          co2: { avg: 450, min: 380, max: 520 },
+        });
         setError('Using mock data - Server not available');
       }
     } finally {
@@ -104,23 +121,39 @@ export default function DashboardScreen() {
         />
       }
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>🌱 Terraponix</Text>
-          <Text style={styles.subtitle}>Smart Farm System</Text>
-        </View>
-        <TouchableOpacity 
-          style={styles.statusButton}
-          onPress={handleSystemAlert}
-        >
-          <Ionicons 
-            name={deviceStatus?.esp32_connected ? "checkmark-circle" : "alert-circle"} 
-            size={24} 
-            color={deviceStatus?.esp32_connected ? "#4ECDC4" : "#FF6B6B"} 
-          />
-        </TouchableOpacity>
-      </View>
+             {/* Header */}
+       <View style={styles.header}>
+         <View style={styles.titleContainer}>
+           <Text style={styles.title}>🌱 Terraponix</Text>
+           <Text style={styles.subtitle}>Smart Farm System</Text>
+         </View>
+         <View style={styles.headerControls}>
+           <View style={styles.viewModeContainer}>
+             <TouchableOpacity
+               style={[styles.viewModeButton, viewMode === 'cards' && styles.activeViewMode]}
+               onPress={() => setViewMode('cards')}
+             >
+               <Ionicons name="grid" size={18} color={viewMode === 'cards' ? '#FFF' : '#666'} />
+             </TouchableOpacity>
+             <TouchableOpacity
+               style={[styles.viewModeButton, viewMode === 'charts' && styles.activeViewMode]}
+               onPress={() => setViewMode('charts')}
+             >
+               <Ionicons name="analytics" size={18} color={viewMode === 'charts' ? '#FFF' : '#666'} />
+             </TouchableOpacity>
+           </View>
+           <TouchableOpacity 
+             style={styles.statusButton}
+             onPress={handleSystemAlert}
+           >
+             <Ionicons 
+               name={deviceStatus?.esp32_connected ? "checkmark-circle" : "alert-circle"} 
+               size={24} 
+               color={deviceStatus?.esp32_connected ? "#4ECDC4" : "#FF6B6B"} 
+             />
+           </TouchableOpacity>
+         </View>
+       </View>
 
       {/* Device Status */}
       {deviceStatus && (
@@ -152,96 +185,194 @@ export default function DashboardScreen() {
         </View>
       )}
 
-      {/* Sensor Data */}
-      {sensorData ? (
-        <>
-          <Text style={styles.sectionTitle}>Sensor Readings</Text>
-          <View style={styles.sensorsGrid}>
-            <SensorCard
-              title="Temperature"
-              value={sensorData.temperature}
-              unit="°C"
-              icon="thermometer"
-              status={getSensorStatus(sensorData.temperature, 20, 30)}
-              min={20}
-              max={30}
-            />
-            <SensorCard
-              title="Humidity"
-              value={sensorData.humidity}
-              unit="%"
-              icon="water"
-              status={getSensorStatus(sensorData.humidity, 60, 80)}
-              min={60}
-              max={80}
-            />
-            <SensorCard
-              title="pH Level"
-              value={sensorData.ph}
-              unit=""
-              icon="flask"
-              status={getSensorStatus(sensorData.ph, 5.5, 6.5)}
-              min={5.5}
-              max={6.5}
-            />
-            <SensorCard
-              title="TDS"
-              value={sensorData.tds}
-              unit="ppm"
-              icon="analytics"
-              status={getSensorStatus(sensorData.tds, 800, 1200)}
-              min={800}
-              max={1200}
-            />
-            <SensorCard
-              title="Light"
-              value={sensorData.light_intensity}
-              unit="%"
-              icon="sunny"
-              status={getSensorStatus(sensorData.light_intensity, 40, 80)}
-              min={40}
-              max={80}
-            />
-            <SensorCard
-              title="CO₂"
-              value={sensorData.co2}
-              unit="ppm"
-              icon="cloud"
-              status={getSensorStatus(sensorData.co2, 300, 600)}
-              min={300}
-              max={600}
-            />
-          </View>
+             {/* Sensor Data */}
+       {sensorData ? (
+         <>
+           <Text style={styles.sectionTitle}>
+             {viewMode === 'charts' ? 'Sensor Charts' : 'Sensor Readings'}
+           </Text>
+           
+           {viewMode === 'charts' ? (
+             /* Chart View */
+             <>
+               <ChartCard
+                 title="Temperature"
+                 sensorType="temperature"
+                 unit="°C"
+                 icon="thermometer"
+                 color="#FF6B6B"
+                 currentValue={sensorData.temperature}
+                 min={20}
+                 max={30}
+               />
+               <ChartCard
+                 title="Humidity"
+                 sensorType="humidity"
+                 unit="%"
+                 icon="water"
+                 color="#4ECDC4"
+                 currentValue={sensorData.humidity}
+                 min={60}
+                 max={80}
+               />
+               <ChartCard
+                 title="pH Level"
+                 sensorType="ph"
+                 unit=""
+                 icon="flask"
+                 color="#45B7D1"
+                 currentValue={sensorData.ph}
+                 min={5.5}
+                 max={6.5}
+               />
+               <ChartCard
+                 title="TDS (Nutrients)"
+                 sensorType="tds"
+                 unit="ppm"
+                 icon="analytics"
+                 color="#96CEB4"
+                 currentValue={sensorData.tds}
+                 min={800}
+                 max={1200}
+               />
+               <ChartCard
+                 title="Light Intensity"
+                 sensorType="light_intensity"
+                 unit="%"
+                 icon="sunny"
+                 color="#FECA57"
+                 currentValue={sensorData.light_intensity}
+                 min={40}
+                 max={80}
+               />
+               <ChartCard
+                 title="CO₂ Level"
+                 sensorType="co2"
+                 unit="ppm"
+                 icon="cloud"
+                 color="#A29BFE"
+                 currentValue={sensorData.co2}
+                 min={300}
+                 max={600}
+               />
+               
+               {/* Additional Sensors Charts */}
+               {sensorData.soil_moisture !== undefined && (
+                 <ChartCard
+                   title="Soil Moisture"
+                   sensorType="soil_moisture"
+                   unit="%"
+                   icon="leaf"
+                   color="#6C5CE7"
+                   currentValue={sensorData.soil_moisture}
+                   min={70}
+                   max={90}
+                 />
+               )}
+               {sensorData.water_level !== undefined && (
+                 <ChartCard
+                   title="Water Level"
+                   sensorType="water_level"
+                   unit="%"
+                   icon="water-outline"
+                   color="#00B894"
+                   currentValue={sensorData.water_level}
+                   min={50}
+                   max={90}
+                 />
+               )}
+             </>
+           ) : (
+             /* Card View */
+             <>
+               <View style={styles.sensorsGrid}>
+                 <SensorCard
+                   title="Temperature"
+                   value={sensorData.temperature}
+                   unit="°C"
+                   icon="thermometer"
+                   status={getSensorStatus(sensorData.temperature, 20, 30)}
+                   min={20}
+                   max={30}
+                 />
+                 <SensorCard
+                   title="Humidity"
+                   value={sensorData.humidity}
+                   unit="%"
+                   icon="water"
+                   status={getSensorStatus(sensorData.humidity, 60, 80)}
+                   min={60}
+                   max={80}
+                 />
+                 <SensorCard
+                   title="pH Level"
+                   value={sensorData.ph}
+                   unit=""
+                   icon="flask"
+                   status={getSensorStatus(sensorData.ph, 5.5, 6.5)}
+                   min={5.5}
+                   max={6.5}
+                 />
+                 <SensorCard
+                   title="TDS"
+                   value={sensorData.tds}
+                   unit="ppm"
+                   icon="analytics"
+                   status={getSensorStatus(sensorData.tds, 800, 1200)}
+                   min={800}
+                   max={1200}
+                 />
+                 <SensorCard
+                   title="Light"
+                   value={sensorData.light_intensity}
+                   unit="%"
+                   icon="sunny"
+                   status={getSensorStatus(sensorData.light_intensity, 40, 80)}
+                   min={40}
+                   max={80}
+                 />
+                 <SensorCard
+                   title="CO₂"
+                   value={sensorData.co2}
+                   unit="ppm"
+                   icon="cloud"
+                   status={getSensorStatus(sensorData.co2, 300, 600)}
+                   min={300}
+                   max={600}
+                 />
+               </View>
 
-          {/* Additional Sensors */}
-          {(sensorData.soil_moisture !== undefined || sensorData.water_level !== undefined) && (
-            <View style={styles.sensorsGrid}>
-              {sensorData.soil_moisture !== undefined && (
-                <SensorCard
-                  title="Soil Moisture"
-                  value={sensorData.soil_moisture}
-                  unit="%"
-                  icon="leaf"
-                  status={getSensorStatus(sensorData.soil_moisture, 70, 90)}
-                  min={70}
-                  max={90}
-                />
-              )}
-              {sensorData.water_level !== undefined && (
-                <SensorCard
-                  title="Water Level"
-                  value={sensorData.water_level}
-                  unit="%"
-                  icon="water-outline"
-                  status={getSensorStatus(sensorData.water_level, 50, 90)}
-                  min={50}
-                  max={90}
-                />
-              )}
-            </View>
-          )}
-        </>
-      ) : (
+               {/* Additional Sensors */}
+               {(sensorData.soil_moisture !== undefined || sensorData.water_level !== undefined) && (
+                 <View style={styles.sensorsGrid}>
+                   {sensorData.soil_moisture !== undefined && (
+                     <SensorCard
+                       title="Soil Moisture"
+                       value={sensorData.soil_moisture}
+                       unit="%"
+                       icon="leaf"
+                       status={getSensorStatus(sensorData.soil_moisture, 70, 90)}
+                       min={70}
+                       max={90}
+                     />
+                   )}
+                   {sensorData.water_level !== undefined && (
+                     <SensorCard
+                       title="Water Level"
+                       value={sensorData.water_level}
+                       unit="%"
+                       icon="water-outline"
+                       status={getSensorStatus(sensorData.water_level, 50, 90)}
+                       min={50}
+                       max={90}
+                     />
+                   )}
+                 </View>
+               )}
+             </>
+           )}
+         </>
+       ) : (
         <View style={styles.noDataContainer}>
           <Ionicons name="alert-circle-outline" size={48} color="#CCC" />
           <Text style={styles.noDataText}>No sensor data available</Text>
@@ -296,6 +427,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 4,
+  },
+  headerControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  viewModeContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F0F0F0',
+    borderRadius: 8,
+    padding: 2,
+    marginRight: 12,
+  },
+  viewModeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: 'transparent',
+  },
+  activeViewMode: {
+    backgroundColor: '#4ECDC4',
   },
   statusButton: {
     padding: 8,

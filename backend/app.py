@@ -4,75 +4,154 @@ from datetime import datetime, timedelta
 import json
 import os
 from typing import Dict, List
-import sqlite3
+import mysql.connector
+from mysql.connector import Error
 import threading
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# Database initialization
+# Database configuration
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', ''),
+    'database': os.getenv('DB_NAME', 'terraponix'),
+    'charset': 'utf8mb4',
+    'autocommit': True
+}
+
+# Database connection pool
+connection_pool = None
+
 def init_db():
-    conn = sqlite3.connect('terraponix.db')
-    cursor = conn.cursor()
+    """Initialize MySQL database and create tables"""
+    global connection_pool
     
-    # Sensor data table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sensor_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            temperature REAL,
-            humidity REAL,
-            ph REAL,
-            tds REAL,
-            light_intensity REAL,
-            co2 REAL,
-            soil_moisture REAL,
-            water_level REAL
+    try:
+        # Create database if not exists
+        temp_config = DB_CONFIG.copy()
+        temp_config.pop('database')
+        
+        connection = mysql.connector.connect(**temp_config)
+        cursor = connection.cursor()
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_CONFIG['database']}")
+        cursor.close()
+        connection.close()
+        
+        # Create connection pool
+        connection_pool = mysql.connector.pooling.MySQLConnectionPool(
+            pool_name="terraponix_pool",
+            pool_size=10,
+            pool_reset_session=True,
+            **DB_CONFIG
         )
-    ''')
-    
-    # Control settings table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS control_settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pump_auto BOOLEAN DEFAULT TRUE,
-            fan_auto BOOLEAN DEFAULT TRUE,
-            curtain_auto BOOLEAN DEFAULT TRUE,
-            pump_status BOOLEAN DEFAULT FALSE,
-            fan_status BOOLEAN DEFAULT FALSE,
-            curtain_status BOOLEAN DEFAULT FALSE,
-            temp_threshold_min REAL DEFAULT 20.0,
-            temp_threshold_max REAL DEFAULT 30.0,
-            humidity_threshold_min REAL DEFAULT 60.0,
-            humidity_threshold_max REAL DEFAULT 80.0,
-            ph_threshold_min REAL DEFAULT 5.5,
-            ph_threshold_max REAL DEFAULT 6.5,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Alert logs table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            alert_type TEXT,
-            message TEXT,
-            severity TEXT DEFAULT 'INFO'
-        )
-    ''')
-    
-    # Insert default control settings if not exists
-    cursor.execute('SELECT COUNT(*) FROM control_settings')
-    if cursor.fetchone()[0] == 0:
+        
+        # Create tables
+        connection = connection_pool.get_connection()
+        cursor = connection.cursor()
+        
+        # Sensor data table
         cursor.execute('''
-            INSERT INTO control_settings (pump_auto, fan_auto, curtain_auto)
-            VALUES (TRUE, TRUE, TRUE)
+            CREATE TABLE IF NOT EXISTS sensor_data (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                temperature DECIMAL(5,2),
+                humidity DECIMAL(5,2),
+                ph DECIMAL(4,2),
+                tds DECIMAL(6,2),
+                light_intensity DECIMAL(5,2),
+                co2 DECIMAL(6,2),
+                soil_moisture DECIMAL(5,2),
+                water_level DECIMAL(5,2),
+                INDEX idx_timestamp (timestamp)
+            ) ENGINE=InnoDB
         ''')
-    
-    conn.commit()
-    conn.close()
+        
+        # Control settings table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS control_settings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                pump_auto BOOLEAN DEFAULT TRUE,
+                fan_auto BOOLEAN DEFAULT TRUE,
+                curtain_auto BOOLEAN DEFAULT TRUE,
+                pump_status BOOLEAN DEFAULT FALSE,
+                fan_status BOOLEAN DEFAULT FALSE,
+                curtain_status BOOLEAN DEFAULT FALSE,
+                temp_threshold_min DECIMAL(5,2) DEFAULT 20.0,
+                temp_threshold_max DECIMAL(5,2) DEFAULT 30.0,
+                humidity_threshold_min DECIMAL(5,2) DEFAULT 60.0,
+                humidity_threshold_max DECIMAL(5,2) DEFAULT 80.0,
+                ph_threshold_min DECIMAL(4,2) DEFAULT 5.5,
+                ph_threshold_max DECIMAL(4,2) DEFAULT 6.5,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB
+        ''')
+        
+        # Alert logs table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                alert_type VARCHAR(50),
+                message TEXT,
+                severity ENUM('INFO', 'WARNING', 'CRITICAL') DEFAULT 'INFO',
+                INDEX idx_timestamp (timestamp),
+                INDEX idx_severity (severity)
+            ) ENGINE=InnoDB
+        ''')
+        
+        # Device status table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS device_status (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                esp32_connected BOOLEAN DEFAULT FALSE,
+                last_heartbeat DATETIME,
+                battery_level DECIMAL(5,2) DEFAULT 100,
+                solar_power DECIMAL(6,2) DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB
+        ''')
+        
+        # Insert default control settings if not exists
+        cursor.execute('SELECT COUNT(*) FROM control_settings')
+        result = cursor.fetchone()
+        if result[0] == 0:
+            cursor.execute('''
+                INSERT INTO control_settings (pump_auto, fan_auto, curtain_auto)
+                VALUES (TRUE, TRUE, TRUE)
+            ''')
+        
+        # Insert default device status if not exists
+        cursor.execute('SELECT COUNT(*) FROM device_status')
+        result = cursor.fetchone()
+        if result[0] == 0:
+            cursor.execute('''
+                INSERT INTO device_status (esp32_connected, battery_level, solar_power)
+                VALUES (FALSE, 100, 0)
+            ''')
+        
+        cursor.close()
+        connection.close()
+        
+        print("✅ MySQL database initialized successfully")
+        
+    except Error as e:
+        print(f"❌ Error initializing database: {e}")
+        raise e
+
+def get_db_connection():
+    """Get database connection from pool"""
+    try:
+        return connection_pool.get_connection()
+    except Error as e:
+        print(f"Error getting database connection: {e}")
+        raise e
 
 # Global variables for real-time data
 current_sensor_data = {}
@@ -82,9 +161,6 @@ device_status = {
     'battery_level': 100,
     'solar_power': 0
 }
-
-# Initialize database
-init_db()
 
 @app.route('/api/sensor-data', methods=['POST'])
 def receive_sensor_data():
@@ -99,11 +175,11 @@ def receive_sensor_data():
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
         # Store in database
-        conn = sqlite3.connect('terraponix.db')
-        cursor = conn.cursor()
+        connection = get_db_connection()
+        cursor = connection.cursor()
         cursor.execute('''
             INSERT INTO sensor_data (temperature, humidity, ph, tds, light_intensity, co2, soil_moisture, water_level)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             data['temperature'],
             data['humidity'],
@@ -114,8 +190,22 @@ def receive_sensor_data():
             data.get('soil_moisture', 0),
             data.get('water_level', 0)
         ))
-        conn.commit()
-        conn.close()
+        
+        # Update device status
+        cursor.execute('''
+            UPDATE device_status SET 
+                esp32_connected = TRUE,
+                last_heartbeat = NOW(),
+                battery_level = %s,
+                solar_power = %s
+            WHERE id = 1
+        ''', (
+            data.get('battery_level', 100),
+            data.get('solar_power', 0)
+        ))
+        
+        cursor.close()
+        connection.close()
         
         # Update global current data
         global current_sensor_data, device_status
@@ -136,35 +226,118 @@ def receive_sensor_data():
 @app.route('/api/current-data', methods=['GET'])
 def get_current_data():
     """Get current sensor data for mobile app"""
-    return jsonify({
-        'sensor_data': current_sensor_data,
-        'device_status': device_status,
-        'timestamp': datetime.now().isoformat()
-    })
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        
+        # Get latest sensor data
+        cursor.execute('''
+            SELECT * FROM sensor_data 
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        ''')
+        sensor_data = cursor.fetchone()
+        
+        # Get device status
+        cursor.execute('SELECT * FROM device_status WHERE id = 1')
+        device_status = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'sensor_data': sensor_data or {},
+            'device_status': device_status or {},
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/historical-data', methods=['GET'])
 def get_historical_data():
-    """Get historical sensor data"""
+    """Get historical sensor data for charts"""
     try:
         hours = request.args.get('hours', 24, type=int)
         limit = request.args.get('limit', 100, type=int)
+        sensor_type = request.args.get('sensor', None)
         
-        conn = sqlite3.connect('terraponix.db')
-        cursor = conn.cursor()
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
         
-        cursor.execute('''
-            SELECT * FROM sensor_data 
-            WHERE timestamp >= datetime('now', '-{} hours')
-            ORDER BY timestamp DESC
-            LIMIT ?
-        '''.format(hours), (limit,))
+        if sensor_type:
+            # Get data for specific sensor
+            cursor.execute(f'''
+                SELECT timestamp, {sensor_type} as value
+                FROM sensor_data 
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+                AND {sensor_type} IS NOT NULL
+                ORDER BY timestamp ASC
+                LIMIT %s
+            ''', (hours, limit))
+        else:
+            # Get all sensor data
+            cursor.execute('''
+                SELECT * FROM sensor_data 
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+                ORDER BY timestamp ASC
+                LIMIT %s
+            ''', (hours, limit))
         
-        columns = [description[0] for description in cursor.description]
-        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        results = cursor.fetchall()
+        cursor.close()
+        connection.close()
         
-        conn.close()
+        # Format timestamps for JavaScript
+        for result in results:
+            if 'timestamp' in result:
+                result['timestamp'] = result['timestamp'].isoformat()
         
         return jsonify(results)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sensor-stats', methods=['GET'])
+def get_sensor_stats():
+    """Get sensor statistics for dashboard"""
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        
+        # Get statistics for each sensor
+        stats = {}
+        sensors = ['temperature', 'humidity', 'ph', 'tds', 'light_intensity', 'co2', 'soil_moisture', 'water_level']
+        
+        for sensor in sensors:
+            cursor.execute(f'''
+                SELECT 
+                    AVG({sensor}) as avg_value,
+                    MIN({sensor}) as min_value,
+                    MAX({sensor}) as max_value,
+                    COUNT({sensor}) as data_points
+                FROM sensor_data 
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+                AND {sensor} IS NOT NULL
+            ''', (hours,))
+            
+            result = cursor.fetchone()
+            if result and result['data_points'] > 0:
+                stats[sensor] = {
+                    'avg': round(float(result['avg_value']), 2) if result['avg_value'] else 0,
+                    'min': float(result['min_value']) if result['min_value'] else 0,
+                    'max': float(result['max_value']) if result['max_value'] else 0,
+                    'data_points': result['data_points']
+                }
+            else:
+                stats[sensor] = {'avg': 0, 'min': 0, 'max': 0, 'data_points': 0}
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify(stats)
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -173,20 +346,21 @@ def get_historical_data():
 def get_controls():
     """Get current control settings"""
     try:
-        conn = sqlite3.connect('terraponix.db')
-        cursor = conn.cursor()
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
         cursor.execute('SELECT * FROM control_settings ORDER BY id DESC LIMIT 1')
         
-        columns = [description[0] for description in cursor.description]
         result = cursor.fetchone()
+        cursor.close()
+        connection.close()
         
         if result:
-            controls = dict(zip(columns, result))
-        else:
-            controls = {}
+            # Convert Decimal to float for JSON serialization
+            for key, value in result.items():
+                if hasattr(value, '__float__'):
+                    result[key] = float(value)
         
-        conn.close()
-        return jsonify(controls)
+        return jsonify(result or {})
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -197,26 +371,25 @@ def update_controls():
     try:
         data = request.get_json()
         
-        conn = sqlite3.connect('terraponix.db')
-        cursor = conn.cursor()
+        connection = get_db_connection()
+        cursor = connection.cursor()
         
         # Update control settings
         cursor.execute('''
             UPDATE control_settings SET
-                pump_auto = ?,
-                fan_auto = ?,
-                curtain_auto = ?,
-                pump_status = ?,
-                fan_status = ?,
-                curtain_status = ?,
-                temp_threshold_min = ?,
-                temp_threshold_max = ?,
-                humidity_threshold_min = ?,
-                humidity_threshold_max = ?,
-                ph_threshold_min = ?,
-                ph_threshold_max = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = (SELECT MAX(id) FROM control_settings)
+                pump_auto = %s,
+                fan_auto = %s,
+                curtain_auto = %s,
+                pump_status = %s,
+                fan_status = %s,
+                curtain_status = %s,
+                temp_threshold_min = %s,
+                temp_threshold_max = %s,
+                humidity_threshold_min = %s,
+                humidity_threshold_max = %s,
+                ph_threshold_min = %s,
+                ph_threshold_max = %s
+            WHERE id = (SELECT id FROM (SELECT id FROM control_settings ORDER BY id DESC LIMIT 1) as t)
         ''', (
             data.get('pump_auto', True),
             data.get('fan_auto', True),
@@ -232,8 +405,8 @@ def update_controls():
             data.get('ph_threshold_max', 6.5)
         ))
         
-        conn.commit()
-        conn.close()
+        cursor.close()
+        connection.close()
         
         return jsonify({'status': 'success', 'message': 'Controls updated successfully'})
     
@@ -246,19 +419,23 @@ def get_alerts():
     try:
         limit = request.args.get('limit', 50, type=int)
         
-        conn = sqlite3.connect('terraponix.db')
-        cursor = conn.cursor()
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
         
         cursor.execute('''
             SELECT * FROM alerts 
             ORDER BY timestamp DESC
-            LIMIT ?
+            LIMIT %s
         ''', (limit,))
         
-        columns = [description[0] for description in cursor.description]
-        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        results = cursor.fetchall()
+        cursor.close()
+        connection.close()
         
-        conn.close()
+        # Format timestamps
+        for result in results:
+            if 'timestamp' in result:
+                result['timestamp'] = result['timestamp'].isoformat()
         
         return jsonify(results)
     
@@ -268,48 +445,50 @@ def get_alerts():
 def check_thresholds(sensor_data):
     """Check sensor data against thresholds and generate alerts"""
     try:
-        conn = sqlite3.connect('terraponix.db')
-        cursor = conn.cursor()
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
         
         # Get current thresholds
         cursor.execute('SELECT * FROM control_settings ORDER BY id DESC LIMIT 1')
         settings = cursor.fetchone()
         
         if not settings:
+            cursor.close()
+            connection.close()
             return
         
         alerts = []
         
         # Temperature check
         temp = sensor_data.get('temperature', 0)
-        if temp < settings[7]:  # temp_threshold_min
+        if temp < settings['temp_threshold_min']:
             alerts.append(('TEMPERATURE', f'Temperature too low: {temp}°C', 'WARNING'))
-        elif temp > settings[8]:  # temp_threshold_max
+        elif temp > settings['temp_threshold_max']:
             alerts.append(('TEMPERATURE', f'Temperature too high: {temp}°C', 'WARNING'))
         
         # Humidity check
         humidity = sensor_data.get('humidity', 0)
-        if humidity < settings[9]:  # humidity_threshold_min
+        if humidity < settings['humidity_threshold_min']:
             alerts.append(('HUMIDITY', f'Humidity too low: {humidity}%', 'WARNING'))
-        elif humidity > settings[10]:  # humidity_threshold_max
+        elif humidity > settings['humidity_threshold_max']:
             alerts.append(('HUMIDITY', f'Humidity too high: {humidity}%', 'WARNING'))
         
         # pH check
         ph = sensor_data.get('ph', 0)
-        if ph < settings[11]:  # ph_threshold_min
+        if ph < settings['ph_threshold_min']:
             alerts.append(('PH', f'pH too low: {ph}', 'CRITICAL'))
-        elif ph > settings[12]:  # ph_threshold_max
+        elif ph > settings['ph_threshold_max']:
             alerts.append(('PH', f'pH too high: {ph}', 'CRITICAL'))
         
         # Insert alerts
         for alert_type, message, severity in alerts:
             cursor.execute('''
                 INSERT INTO alerts (alert_type, message, severity)
-                VALUES (?, ?, ?)
+                VALUES (%s, %s, %s)
             ''', (alert_type, message, severity))
         
-        conn.commit()
-        conn.close()
+        cursor.close()
+        connection.close()
         
     except Exception as e:
         print(f"Error checking thresholds: {e}")
@@ -322,13 +501,6 @@ def send_device_command():
         command = data.get('command')
         value = data.get('value')
         
-        # Store command for ESP32 to retrieve
-        # In a real implementation, you might use MQTT or WebSocket
-        # For now, we'll store it in a simple way
-        
-        # Here you would implement the actual command sending logic
-        # This could be via MQTT, HTTP request to ESP32, or WebSocket
-        
         return jsonify({
             'status': 'success', 
             'message': f'Command {command} sent successfully',
@@ -339,33 +511,73 @@ def send_device_command():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    try:
+        # Test database connection
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        cursor.execute('SELECT 1')
+        cursor.fetchone()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'timestamp': datetime.now().isoformat(),
+            'version': '2.0.0'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'database': 'disconnected',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 # Background task to check device connectivity
 def check_device_connectivity():
     """Background task to monitor device connectivity"""
     while True:
-        if device_status['last_heartbeat']:
-            time_diff = datetime.now() - device_status['last_heartbeat']
-            if time_diff > timedelta(minutes=5):
-                device_status['esp32_connected'] = False
+        try:
+            connection = get_db_connection()
+            cursor = connection.cursor()
+            
+            # Check if ESP32 has sent data recently
+            cursor.execute('''
+                UPDATE device_status 
+                SET esp32_connected = CASE 
+                    WHEN last_heartbeat >= DATE_SUB(NOW(), INTERVAL 5 MINUTE) THEN TRUE 
+                    ELSE FALSE 
+                END
+                WHERE id = 1
+            ''')
+            
+            cursor.close()
+            connection.close()
+            
+        except Exception as e:
+            print(f"Error checking device connectivity: {e}")
         
         time.sleep(60)  # Check every minute
 
-# Start background thread
-connectivity_thread = threading.Thread(target=check_device_connectivity)
-connectivity_thread.daemon = True
-connectivity_thread.start()
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'version': '1.0.0'
-    })
+# Initialize database
+try:
+    init_db()
+    
+    # Start background thread
+    connectivity_thread = threading.Thread(target=check_device_connectivity)
+    connectivity_thread.daemon = True
+    connectivity_thread.start()
+    
+except Exception as e:
+    print(f"Failed to initialize application: {e}")
+    exit(1)
 
 if __name__ == '__main__':
     print("🌱 Terraponix Backend Server Starting...")
-    print("📊 Dashboard will be available at: http://localhost:5000")
+    print("📊 Using MySQL Database")
     print("🔌 ESP32 can send data to: http://localhost:5000/api/sensor-data")
     app.run(debug=True, host='0.0.0.0', port=5000)
