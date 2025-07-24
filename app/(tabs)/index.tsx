@@ -13,6 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import SensorCard from '../../components/SensorCard';
 import ChartCard from '../../components/ChartCard';
+import TrendCard from '../../components/TrendCard';
+import OverviewPanel from '../../components/OverviewPanel';
 import { apiService, SensorData, DeviceStatus } from '../../services/apiService';
 
 export default function DashboardScreen() {
@@ -22,8 +24,8 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'cards' | 'charts'>('charts');
   const [sensorStats, setSensorStats] = useState<any>({});
+  const [showDetailedCharts, setShowDetailedCharts] = useState<boolean>(false);
 
   const fetchData = async () => {
     setError(null);
@@ -127,32 +129,31 @@ export default function DashboardScreen() {
            <Text style={styles.title}>🌱 Terraponix</Text>
            <Text style={styles.subtitle}>Smart Farm System</Text>
          </View>
-         <View style={styles.headerControls}>
-           <View style={styles.viewModeContainer}>
-             <TouchableOpacity
-               style={[styles.viewModeButton, viewMode === 'cards' && styles.activeViewMode]}
-               onPress={() => setViewMode('cards')}
-             >
-               <Ionicons name="grid" size={18} color={viewMode === 'cards' ? '#FFF' : '#666'} />
-             </TouchableOpacity>
-             <TouchableOpacity
-               style={[styles.viewModeButton, viewMode === 'charts' && styles.activeViewMode]}
-               onPress={() => setViewMode('charts')}
-             >
-               <Ionicons name="analytics" size={18} color={viewMode === 'charts' ? '#FFF' : '#666'} />
-             </TouchableOpacity>
-           </View>
-           <TouchableOpacity 
-             style={styles.statusButton}
-             onPress={handleSystemAlert}
-           >
-             <Ionicons 
-               name={deviceStatus?.esp32_connected ? "checkmark-circle" : "alert-circle"} 
-               size={24} 
-               color={deviceStatus?.esp32_connected ? "#4ECDC4" : "#FF6B6B"} 
-             />
-           </TouchableOpacity>
-         </View>
+                   <View style={styles.headerControls}>
+            <TouchableOpacity
+              style={[styles.viewToggleButton, showDetailedCharts && styles.activeToggle]}
+              onPress={() => setShowDetailedCharts(!showDetailedCharts)}
+            >
+              <Ionicons 
+                name={showDetailedCharts ? "bar-chart" : "analytics"} 
+                size={18} 
+                color={showDetailedCharts ? '#FFF' : '#666'} 
+              />
+              <Text style={[styles.toggleText, showDetailedCharts && styles.activeToggleText]}>
+                {showDetailedCharts ? 'Detailed' : 'Trends'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.statusButton}
+              onPress={handleSystemAlert}
+            >
+              <Ionicons 
+                name={deviceStatus?.esp32_connected ? "checkmark-circle" : "alert-circle"} 
+                size={24} 
+                color={deviceStatus?.esp32_connected ? "#4ECDC4" : "#FF6B6B"} 
+              />
+            </TouchableOpacity>
+          </View>
        </View>
 
       {/* Device Status */}
@@ -177,202 +178,209 @@ export default function DashboardScreen() {
         </View>
       )}
 
-      {/* Error Message */}
-      {error && (
-        <View style={styles.errorContainer}>
-          <Ionicons name="warning" size={20} color="#FF6B6B" />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
+             {/* Error Message */}
+       {error && (
+         <View style={styles.errorContainer}>
+           <Ionicons name="warning" size={20} color="#FF6B6B" />
+           <Text style={styles.errorText}>{error}</Text>
+         </View>
+       )}
 
-             {/* Sensor Data */}
-       {sensorData ? (
-         <>
-           <Text style={styles.sectionTitle}>
-             {viewMode === 'charts' ? 'Sensor Charts' : 'Sensor Readings'}
-           </Text>
-           
-           {viewMode === 'charts' ? (
-             /* Chart View */
-             <>
-               <ChartCard
-                 title="Temperature"
-                 sensorType="temperature"
-                 unit="°C"
-                 icon="thermometer"
-                 color="#FF6B6B"
-                 currentValue={sensorData.temperature}
-                 min={20}
-                 max={30}
-               />
-               <ChartCard
-                 title="Humidity"
-                 sensorType="humidity"
-                 unit="%"
-                 icon="water"
-                 color="#4ECDC4"
-                 currentValue={sensorData.humidity}
-                 min={60}
-                 max={80}
-               />
-               <ChartCard
-                 title="pH Level"
-                 sensorType="ph"
-                 unit=""
-                 icon="flask"
-                 color="#45B7D1"
-                 currentValue={sensorData.ph}
-                 min={5.5}
-                 max={6.5}
-               />
-               <ChartCard
-                 title="TDS (Nutrients)"
-                 sensorType="tds"
-                 unit="ppm"
-                 icon="analytics"
-                 color="#96CEB4"
-                 currentValue={sensorData.tds}
-                 min={800}
-                 max={1200}
-               />
-               <ChartCard
-                 title="Light Intensity"
-                 sensorType="light_intensity"
-                 unit="%"
-                 icon="sunny"
-                 color="#FECA57"
-                 currentValue={sensorData.light_intensity}
-                 min={40}
-                 max={80}
-               />
-               <ChartCard
-                 title="CO₂ Level"
-                 sensorType="co2"
-                 unit="ppm"
-                 icon="cloud"
-                 color="#A29BFE"
-                 currentValue={sensorData.co2}
-                 min={300}
-                 max={600}
-               />
-               
-               {/* Additional Sensors Charts */}
-               {sensorData.soil_moisture !== undefined && (
-                 <ChartCard
-                   title="Soil Moisture"
-                   sensorType="soil_moisture"
-                   unit="%"
-                   icon="leaf"
-                   color="#6C5CE7"
-                   currentValue={sensorData.soil_moisture}
-                   min={70}
-                   max={90}
-                 />
-               )}
-               {sensorData.water_level !== undefined && (
-                 <ChartCard
-                   title="Water Level"
-                   sensorType="water_level"
-                   unit="%"
-                   icon="water-outline"
-                   color="#00B894"
-                   currentValue={sensorData.water_level}
-                   min={50}
-                   max={90}
-                 />
-               )}
-             </>
-           ) : (
-             /* Card View */
-             <>
-               <View style={styles.sensorsGrid}>
-                 <SensorCard
-                   title="Temperature"
-                   value={sensorData.temperature}
-                   unit="°C"
-                   icon="thermometer"
-                   status={getSensorStatus(sensorData.temperature, 20, 30)}
-                   min={20}
-                   max={30}
-                 />
-                 <SensorCard
-                   title="Humidity"
-                   value={sensorData.humidity}
-                   unit="%"
-                   icon="water"
-                   status={getSensorStatus(sensorData.humidity, 60, 80)}
-                   min={60}
-                   max={80}
-                 />
-                 <SensorCard
-                   title="pH Level"
-                   value={sensorData.ph}
-                   unit=""
-                   icon="flask"
-                   status={getSensorStatus(sensorData.ph, 5.5, 6.5)}
-                   min={5.5}
-                   max={6.5}
-                 />
-                 <SensorCard
-                   title="TDS"
-                   value={sensorData.tds}
-                   unit="ppm"
-                   icon="analytics"
-                   status={getSensorStatus(sensorData.tds, 800, 1200)}
-                   min={800}
-                   max={1200}
-                 />
-                 <SensorCard
-                   title="Light"
-                   value={sensorData.light_intensity}
-                   unit="%"
-                   icon="sunny"
-                   status={getSensorStatus(sensorData.light_intensity, 40, 80)}
-                   min={40}
-                   max={80}
-                 />
-                 <SensorCard
-                   title="CO₂"
-                   value={sensorData.co2}
-                   unit="ppm"
-                   icon="cloud"
-                   status={getSensorStatus(sensorData.co2, 300, 600)}
-                   min={300}
-                   max={600}
-                 />
-               </View>
+       {/* Overview Panel */}
+       {sensorData && (
+         <OverviewPanel sensorData={sensorData} />
+       )}
 
-               {/* Additional Sensors */}
-               {(sensorData.soil_moisture !== undefined || sensorData.water_level !== undefined) && (
-                 <View style={styles.sensorsGrid}>
-                   {sensorData.soil_moisture !== undefined && (
-                     <SensorCard
-                       title="Soil Moisture"
-                       value={sensorData.soil_moisture}
-                       unit="%"
-                       icon="leaf"
-                       status={getSensorStatus(sensorData.soil_moisture, 70, 90)}
-                       min={70}
-                       max={90}
-                     />
-                   )}
-                   {sensorData.water_level !== undefined && (
-                     <SensorCard
-                       title="Water Level"
-                       value={sensorData.water_level}
-                       unit="%"
-                       icon="water-outline"
-                       status={getSensorStatus(sensorData.water_level, 50, 90)}
-                       min={50}
-                       max={90}
-                     />
-                   )}
-                 </View>
-               )}
-             </>
-           )}
-         </>
-       ) : (
+       {/* Sensor Data */}
+                {sensorData ? (
+          <>
+            <Text style={styles.sectionTitle}>
+              {showDetailedCharts ? 'Detailed Sensor Analysis' : 'Sensor Trends & Indicators'}
+            </Text>
+            
+            {showDetailedCharts ? (
+              /* Detailed Chart View */
+              <>
+                <ChartCard
+                  title="Temperature"
+                  sensorType="temperature"
+                  unit="°C"
+                  icon="thermometer"
+                  color="#FF6B6B"
+                  currentValue={sensorData.temperature}
+                  min={20}
+                  max={30}
+                />
+                <ChartCard
+                  title="Humidity"
+                  sensorType="humidity"
+                  unit="%"
+                  icon="water"
+                  color="#4ECDC4"
+                  currentValue={sensorData.humidity}
+                  min={60}
+                  max={80}
+                />
+                <ChartCard
+                  title="pH Level"
+                  sensorType="ph"
+                  unit=""
+                  icon="flask"
+                  color="#45B7D1"
+                  currentValue={sensorData.ph}
+                  min={5.5}
+                  max={6.5}
+                />
+                <ChartCard
+                  title="TDS (Nutrients)"
+                  sensorType="tds"
+                  unit="ppm"
+                  icon="analytics"
+                  color="#96CEB4"
+                  currentValue={sensorData.tds}
+                  min={800}
+                  max={1200}
+                />
+                <ChartCard
+                  title="Light Intensity"
+                  sensorType="light_intensity"
+                  unit="%"
+                  icon="sunny"
+                  color="#FECA57"
+                  currentValue={sensorData.light_intensity}
+                  min={40}
+                  max={80}
+                />
+                <ChartCard
+                  title="CO₂ Level"
+                  sensorType="co2"
+                  unit="ppm"
+                  icon="cloud"
+                  color="#A29BFE"
+                  currentValue={sensorData.co2}
+                  min={300}
+                  max={600}
+                />
+                
+                {/* Additional Sensors Charts */}
+                {sensorData.soil_moisture !== undefined && (
+                  <ChartCard
+                    title="Soil Moisture"
+                    sensorType="soil_moisture"
+                    unit="%"
+                    icon="leaf"
+                    color="#6C5CE7"
+                    currentValue={sensorData.soil_moisture}
+                    min={70}
+                    max={90}
+                  />
+                )}
+                {sensorData.water_level !== undefined && (
+                  <ChartCard
+                    title="Water Level"
+                    sensorType="water_level"
+                    unit="%"
+                    icon="water-outline"
+                    color="#00B894"
+                    currentValue={sensorData.water_level}
+                    min={50}
+                    max={90}
+                  />
+                )}
+              </>
+            ) : (
+              /* Trend View - Default */
+              <>
+                <TrendCard
+                  title="Temperature"
+                  sensorType="temperature"
+                  unit="°C"
+                  icon="thermometer"
+                  color="#FF6B6B"
+                  currentValue={sensorData.temperature}
+                  min={20}
+                  max={30}
+                />
+                <TrendCard
+                  title="Humidity"
+                  sensorType="humidity"
+                  unit="%"
+                  icon="water"
+                  color="#4ECDC4"
+                  currentValue={sensorData.humidity}
+                  min={60}
+                  max={80}
+                />
+                <TrendCard
+                  title="pH Level"
+                  sensorType="ph"
+                  unit=""
+                  icon="flask"
+                  color="#45B7D1"
+                  currentValue={sensorData.ph}
+                  min={5.5}
+                  max={6.5}
+                />
+                <TrendCard
+                  title="TDS (Nutrients)"
+                  sensorType="tds"
+                  unit="ppm"
+                  icon="analytics"
+                  color="#96CEB4"
+                  currentValue={sensorData.tds}
+                  min={800}
+                  max={1200}
+                />
+                <TrendCard
+                  title="Light Intensity"
+                  sensorType="light_intensity"
+                  unit="%"
+                  icon="sunny"
+                  color="#FECA57"
+                  currentValue={sensorData.light_intensity}
+                  min={40}
+                  max={80}
+                />
+                <TrendCard
+                  title="CO₂ Level"
+                  sensorType="co2"
+                  unit="ppm"
+                  icon="cloud"
+                  color="#A29BFE"
+                  currentValue={sensorData.co2}
+                  min={300}
+                  max={600}
+                />
+                
+                {/* Additional Sensors Trends */}
+                {sensorData.soil_moisture !== undefined && (
+                  <TrendCard
+                    title="Soil Moisture"
+                    sensorType="soil_moisture"
+                    unit="%"
+                    icon="leaf"
+                    color="#6C5CE7"
+                    currentValue={sensorData.soil_moisture}
+                    min={70}
+                    max={90}
+                  />
+                )}
+                {sensorData.water_level !== undefined && (
+                  <TrendCard
+                    title="Water Level"
+                    sensorType="water_level"
+                    unit="%"
+                    icon="water-outline"
+                    color="#00B894"
+                    currentValue={sensorData.water_level}
+                    min={50}
+                    max={90}
+                  />
+                )}
+              </>
+            )}
+          </>
+        ) : (
         <View style={styles.noDataContainer}>
           <Ionicons name="alert-circle-outline" size={48} color="#CCC" />
           <Text style={styles.noDataText}>No sensor data available</Text>
@@ -432,21 +440,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  viewModeContainer: {
+  viewToggleButton: {
     flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#F0F0F0',
-    borderRadius: 8,
-    padding: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
     marginRight: 12,
   },
-  viewModeButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: 'transparent',
-  },
-  activeViewMode: {
+  activeToggle: {
     backgroundColor: '#4ECDC4',
+  },
+  toggleText: {
+    marginLeft: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  activeToggleText: {
+    color: '#FFF',
   },
   statusButton: {
     padding: 8,
